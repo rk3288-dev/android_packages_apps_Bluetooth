@@ -34,6 +34,7 @@ import javax.obex.ResponseCodes;
 
 import org.xmlpull.v1.XmlSerializer;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -45,13 +46,16 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.IntentFilter.MalformedMimeTypeException;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
+import android.os.Process;
 import android.os.RemoteException;
 import android.provider.BaseColumns;
 import com.android.bluetooth.mapapi.BluetoothMapContract;
@@ -67,6 +71,7 @@ import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.telephony.TelephonyManager;
 import android.text.format.DateUtils;
+import android.util.EventLog;
 import android.util.Log;
 import android.util.Xml;
 import android.os.Looper;
@@ -1704,9 +1709,6 @@ public class BluetoothMapContentObserver {
 
             IntentFilter intentFilter = new IntentFilter();
             intentFilter.addAction(ACTION_MESSAGE_DELIVERY);
-            /* The reception of ACTION_MESSAGE_SENT have been moved to the MAP
-             * service, to be able to handle message sent events after a disconnect. */
-            //intentFilter.addAction(ACTION_MESSAGE_SENT);
             try{
                 intentFilter.addDataType("message/*");
             } catch (MalformedMimeTypeException e) {
@@ -1878,6 +1880,14 @@ public class BluetoothMapContentObserver {
     }
 
     static public void actionMessageSentDisconnected(Context context, Intent intent, int result) {
+        /* Check permission for message deletion. */
+        if (context.checkCallingOrSelfPermission(android.Manifest.permission.WRITE_SMS)
+              != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "actionMessageSentDisconnected: Not allowed to delete SMS/MMS messages");
+            EventLog.writeEvent(0x534e4554, "b/22343270", Binder.getCallingUid(), "");
+            return;
+        }
+
         boolean delete = false;
         //int retry = intent.getIntExtra(EXTRA_MESSAGE_SENT_RETRY, 0);
         int transparent = intent.getIntExtra(EXTRA_MESSAGE_SENT_TRANSPARENT, 0);
@@ -1914,10 +1924,10 @@ public class BluetoothMapContentObserver {
             }
         }
 
-        if (delete == true) {
+        if (delete) {
             /* Delete from DB */
             ContentResolver resolver = context.getContentResolver();
-            if(resolver != null) {
+            if (resolver != null) {
                 resolver.delete(uri, null, null);
             } else {
                 Log.w(TAG, "Unable to get resolver");
